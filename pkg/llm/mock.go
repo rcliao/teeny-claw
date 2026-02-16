@@ -1,23 +1,55 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // Mock is a test double for Client.
 type Mock struct {
-	// Response is returned by Generate calls.
-	Response string
+	mu sync.Mutex
+
+	// Response is returned by Send calls.
+	Response *Response
 	// Err is returned if non-nil.
 	Err error
-	// Calls records all prompts received.
-	Calls []string
+	// Requests records all requests received.
+	Requests []*Request
 }
 
-func (m *Mock) Generate(_ context.Context, prompt string) (string, error) {
-	m.Calls = append(m.Calls, prompt)
+// NewMock creates a Mock that returns the given text.
+func NewMock(text string) *Mock {
+	return &Mock{
+		Response: &Response{
+			Message:    TextMessage(RoleAssistant, text),
+			StopReason: StopEnd,
+		},
+	}
+}
+
+// NewMockToolCall creates a Mock that returns a tool call.
+func NewMockToolCall(toolCallID, toolName string, input []byte) *Mock {
+	return &Mock{
+		Response: &Response{
+			Message: Message{
+				Role: RoleAssistant,
+				Content: []ContentPart{{
+					Type:       ContentToolCall,
+					ToolCallID: toolCallID,
+					ToolName:   toolName,
+					ToolInput:  input,
+				}},
+			},
+			StopReason: StopTool,
+		},
+	}
+}
+
+func (m *Mock) Send(_ context.Context, req *Request) (*Response, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Requests = append(m.Requests, req)
 	return m.Response, m.Err
 }
 
-func (m *Mock) GenerateWithSystem(_ context.Context, system, prompt string) (string, error) {
-	m.Calls = append(m.Calls, system+"\n"+prompt)
-	return m.Response, m.Err
-}
+var _ Client = (*Mock)(nil)

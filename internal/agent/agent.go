@@ -57,6 +57,7 @@ type ActionResult struct {
 // Agent is the core autonomous agent.
 type Agent struct {
 	llm         llm.Client
+	model       string
 	memory      *memory.Manager
 	tools       *tools.Registry
 	maxRetries  int
@@ -98,6 +99,16 @@ func WithLogger(l *slog.Logger) Option {
 	return func(a *Agent) { a.logger = l }
 }
 
+// WithModel sets the model ID for LLM requests.
+func WithModel(model string) Option {
+	return func(a *Agent) { a.model = model }
+}
+
+// generate sends a simple text prompt to the LLM and returns the text response.
+func (a *Agent) generate(ctx context.Context, prompt string) (string, error) {
+	return llm.Generate(ctx, a.llm, a.model, prompt)
+}
+
 // Run executes a single GEPA cycle for the given task.
 func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 	start := time.Now()
@@ -122,7 +133,7 @@ func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 		"Task: %s\n\nContext: %s\n\nRelevant memories:\n%s\n\nCreate a concise plan to accomplish this task. List specific steps.",
 		task.Description, task.Context, memContext,
 	)
-	plan, err := a.llm.Generate(ctx, planPrompt)
+	plan, err := a.generate(ctx, planPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("planning: %w", err)
 	}
@@ -137,7 +148,7 @@ func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 		"Task: %s\nPlan: %s\nActions taken:\n%s\n\nReflect: What worked? What didn't? What lesson should be remembered?",
 		task.Description, plan, actSummary,
 	)
-	reflection, err := a.llm.Generate(ctx, reflectPrompt)
+	reflection, err := a.generate(ctx, reflectPrompt)
 	if err != nil {
 		a.logger.Warn("agent: reflection failed", "error", err)
 		reflection = "reflection unavailable"
@@ -166,7 +177,7 @@ func (a *Agent) act(ctx context.Context, result *StepResult) {
 			"Plan:\n%s\n\nAvailable tools: %v\n\n%sWhat is the next tool call? Reply with TOOL:<name> INPUT:<input> or DONE if the plan is complete.",
 			result.Plan, toolNames, history,
 		)
-		response, err := a.llm.Generate(ctx, prompt)
+		response, err := a.generate(ctx, prompt)
 		if err != nil {
 			a.logger.Warn("agent: act LLM call failed", "error", err)
 			break

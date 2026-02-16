@@ -10,7 +10,7 @@ import (
 	"github.com/rcliao/teeny-claw/pkg/llm"
 )
 
-func newTestAgent(mock *llm.Mock) (*Agent, *memory.Manager, *tools.Registry) {
+func newTestAgent(mock llm.Client) (*Agent, *memory.Manager, *tools.Registry) {
 	store := memory.NewMemStore()
 	mem := memory.NewManager(store)
 	reg := tools.NewRegistry()
@@ -20,7 +20,7 @@ func newTestAgent(mock *llm.Mock) (*Agent, *memory.Manager, *tools.Registry) {
 }
 
 func TestRunBasicCycle(t *testing.T) {
-	mock := &llm.Mock{Response: "DONE"}
+	mock := llm.NewMock("DONE")
 	agent, _, _ := newTestAgent(mock)
 
 	task := Task{ID: "t1", Description: "test task"}
@@ -35,17 +35,17 @@ func TestRunBasicCycle(t *testing.T) {
 		t.Errorf("got task ID %q, want t1", result.Task.ID)
 	}
 	// Should have 3 LLM calls: plan, act, reflect
-	if len(mock.Calls) != 3 {
-		t.Errorf("got %d LLM calls, want 3", len(mock.Calls))
+	if len(mock.Requests) != 3 {
+		t.Errorf("got %d LLM calls, want 3", len(mock.Requests))
 	}
 }
 
 func TestRunWithToolCall(t *testing.T) {
 	responses := []string{
-		"Step 1: run echo",                    // plan
-		`TOOL:shell INPUT:echo hello`,         // act (first call)
-		"DONE",                                // act (second call, after tool result)
-		"Learned that echo works",             // reflect
+		"Step 1: run echo",            // plan
+		`TOOL:shell INPUT:echo hello`, // act (first call)
+		"DONE",                        // act (second call, after tool result)
+		"Learned that echo works",     // reflect
 	}
 	mock := &sequenceMock{responses: responses}
 	store := memory.NewMemStore()
@@ -62,7 +62,6 @@ func TestRunWithToolCall(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success")
 	}
-	// Should have at least one real tool action
 	found := false
 	for _, a := range result.Actions {
 		if a.Tool == "shell" {
@@ -79,11 +78,11 @@ func TestRunWithToolCall(t *testing.T) {
 
 func TestRunWithSelfCorrection(t *testing.T) {
 	responses := []string{
-		"Step 1: run failing command",                // plan
-		`TOOL:shell INPUT:false`,                     // act: 'false' exits 1
-		`TOOL:shell INPUT:echo recovered`,            // act: retry with correction
-		"DONE",                                       // act: done
-		"Learned to handle failures",                 // reflect
+		"Step 1: run failing command",     // plan
+		`TOOL:shell INPUT:false`,          // act: 'false' exits 1
+		`TOOL:shell INPUT:echo recovered`, // act: retry with correction
+		"DONE",                            // act: done
+		"Learned to handle failures",      // reflect
 	}
 	mock := &sequenceMock{responses: responses}
 	store := memory.NewMemStore()
@@ -100,7 +99,6 @@ func TestRunWithSelfCorrection(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success after correction")
 	}
-	// Should have both failing and succeeding actions
 	var failCount, okCount int
 	for _, a := range result.Actions {
 		if a.Tool == "shell" {
@@ -131,8 +129,7 @@ func TestRunPlanError(t *testing.T) {
 }
 
 func TestRunMaxActSteps(t *testing.T) {
-	// LLM always returns a tool call — should stop at maxActSteps
-	mock := &llm.Mock{Response: "TOOL:shell INPUT:echo loop"}
+	mock := llm.NewMock("TOOL:shell INPUT:echo loop")
 	store := memory.NewMemStore()
 	mem := memory.NewManager(store)
 	reg := tools.NewRegistry()
@@ -144,7 +141,6 @@ func TestRunMaxActSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should have exactly 3 shell actions (capped)
 	shellCount := 0
 	for _, a := range result.Actions {
 		if a.Tool == "shell" {
@@ -162,15 +158,17 @@ type sequenceMock struct {
 	idx       int
 }
 
-func (m *sequenceMock) Generate(_ context.Context, prompt string) (string, error) {
+func (m *sequenceMock) Send(_ context.Context, req *llm.Request) (*llm.Response, error) {
 	if m.idx >= len(m.responses) {
-		return "DONE", nil
+		return &llm.Response{
+			Message:    llm.TextMessage(llm.RoleAssistant, "DONE"),
+			StopReason: llm.StopEnd,
+		}, nil
 	}
 	r := m.responses[m.idx]
 	m.idx++
-	return r, nil
-}
-
-func (m *sequenceMock) GenerateWithSystem(_ context.Context, system, prompt string) (string, error) {
-	return m.Generate(nil, system+"\n"+prompt)
+	return &llm.Response{
+		Message:    llm.TextMessage(llm.RoleAssistant, r),
+		StopReason: llm.StopEnd,
+	}, nil
 }
