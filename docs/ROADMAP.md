@@ -86,7 +86,7 @@ Each tool follows this loop:
 
 | Tool | Phase | Status |
 |------|-------|--------|
-| agent-memory | — | Not started |
+| agent-memory | Build ✅ | MVP complete — put/get/list/rm with SQLite, versioning, chunking |
 | token-eval | — | Not started |
 | agent-artifacts | — | Not started |
 | research-helper | — | Not started |
