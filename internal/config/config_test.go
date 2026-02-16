@@ -61,9 +61,9 @@ func TestLoadValid(t *testing.T) {
 	if cfg.Memory.Dir != "custom" {
 		t.Errorf("expected Dir=custom, got %s", cfg.Memory.Dir)
 	}
-	// Unset fields should be zero-valued (not defaults, since JSON unmarshal overwrites)
-	if cfg.Process.DefaultTimeout != 0 {
-		t.Errorf("expected zero timeout from partial JSON, got %v", cfg.Process.DefaultTimeout)
+	// Unset fields keep defaults since we unmarshal into a pre-filled struct.
+	if cfg.Process.DefaultTimeout != 5*time.Minute {
+		t.Errorf("expected default 5m timeout for unset field, got %v", cfg.Process.DefaultTimeout)
 	}
 }
 

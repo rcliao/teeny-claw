@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/rcliao/teeny-claw/internal/memory"
@@ -24,6 +25,8 @@ const (
 	PhaseReflect Phase = "reflect"
 	PhaseEvolve  Phase = "evolve"
 )
+
+const defaultMaxActSteps = 10
 
 // Task represents a unit of work for the agent.
 type Task struct {
@@ -53,21 +56,23 @@ type ActionResult struct {
 
 // Agent is the core autonomous agent.
 type Agent struct {
-	llm        llm.Client
-	memory     *memory.Manager
-	tools      *tools.Registry
-	maxRetries int
-	logger     *slog.Logger
+	llm         llm.Client
+	memory      *memory.Manager
+	tools       *tools.Registry
+	maxRetries  int
+	maxActSteps int
+	logger      *slog.Logger
 }
 
 // New creates an Agent with the given dependencies.
 func New(client llm.Client, mem *memory.Manager, reg *tools.Registry, opts ...Option) *Agent {
 	a := &Agent{
-		llm:        client,
-		memory:     mem,
-		tools:      reg,
-		maxRetries: 3,
-		logger:     slog.Default(),
+		llm:         client,
+		memory:      mem,
+		tools:       reg,
+		maxRetries:  3,
+		maxActSteps: defaultMaxActSteps,
+		logger:      slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -81,6 +86,11 @@ type Option func(*Agent)
 // WithMaxRetries sets the retry limit for self-correction.
 func WithMaxRetries(n int) Option {
 	return func(a *Agent) { a.maxRetries = n }
+}
+
+// WithMaxActSteps sets the maximum tool calls per cycle.
+func WithMaxActSteps(n int) Option {
+	return func(a *Agent) { a.maxActSteps = n }
 }
 
 // WithLogger sets the agent's logger.
@@ -118,28 +128,14 @@ func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 	}
 	result.Plan = plan
 
-	// 4. Act — ask LLM what tool calls to make, then execute them.
-	actPrompt := fmt.Sprintf(
-		"Plan:\n%s\n\nAvailable tools: %v\n\nWhat is the first tool call to execute? Reply with TOOL:<name> INPUT:<input> or DONE if complete.",
-		plan, a.tools.List(),
-	)
-	response, err := a.llm.Generate(ctx, actPrompt)
-	if err != nil {
-		return nil, fmt.Errorf("acting: %w", err)
-	}
-
-	// For now, store the raw response as an action. Tool parsing comes next iteration.
-	result.Actions = append(result.Actions, ActionResult{
-		Tool:   "llm",
-		Input:  actPrompt,
-		Output: response,
-		OK:     true,
-	})
+	// 4. Act — multi-step tool execution with self-correction.
+	a.act(ctx, result)
 
 	// 5. Reflect — analyze what happened.
+	actSummary := a.summarizeActions(result.Actions)
 	reflectPrompt := fmt.Sprintf(
-		"Task: %s\nPlan: %s\nOutcome: %s\n\nReflect: What worked? What didn't? What lesson should be remembered?",
-		task.Description, plan, response,
+		"Task: %s\nPlan: %s\nActions taken:\n%s\n\nReflect: What worked? What didn't? What lesson should be remembered?",
+		task.Description, plan, actSummary,
 	)
 	reflection, err := a.llm.Generate(ctx, reflectPrompt)
 	if err != nil {
@@ -158,4 +154,92 @@ func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 
 	a.logger.Info("agent: cycle complete", "task", task.ID, "duration", result.Duration)
 	return result, nil
+}
+
+// act runs the multi-step tool execution loop with self-correction.
+func (a *Agent) act(ctx context.Context, result *StepResult) {
+	var history string
+	toolNames := a.tools.List()
+
+	for step := 0; step < a.maxActSteps; step++ {
+		prompt := fmt.Sprintf(
+			"Plan:\n%s\n\nAvailable tools: %v\n\n%sWhat is the next tool call? Reply with TOOL:<name> INPUT:<input> or DONE if the plan is complete.",
+			result.Plan, toolNames, history,
+		)
+		response, err := a.llm.Generate(ctx, prompt)
+		if err != nil {
+			a.logger.Warn("agent: act LLM call failed", "error", err)
+			break
+		}
+
+		toolName, input, done := parseToolCall(response)
+		if done {
+			break
+		}
+
+		// Execute the tool.
+		tr := a.tools.Execute(ctx, toolName, input)
+		ar := ActionResult{
+			Tool:   toolName,
+			Input:  input,
+			Output: tr.Output,
+			OK:     tr.OK(),
+		}
+		result.Actions = append(result.Actions, ar)
+
+		if tr.OK() {
+			history += fmt.Sprintf("Step %d: TOOL:%s → OK: %s\n", step+1, toolName, truncate(tr.Output, 200))
+		} else {
+			// Self-correction: feed error back to LLM.
+			history += fmt.Sprintf("Step %d: TOOL:%s → ERROR: %s (output: %s)\n", step+1, toolName, tr.Error, truncate(tr.Output, 200))
+			a.logger.Info("agent: tool failed, will self-correct", "tool", toolName, "error", tr.Error)
+		}
+	}
+}
+
+// parseToolCall extracts tool name and input from LLM response.
+// Expected format: "TOOL:<name> INPUT:<input>" or "DONE".
+func parseToolCall(response string) (tool, input string, done bool) {
+	response = strings.TrimSpace(response)
+	if strings.HasPrefix(response, "DONE") || !strings.Contains(response, "TOOL:") {
+		return "", "", true
+	}
+
+	// Extract TOOL:<name>
+	toolIdx := strings.Index(response, "TOOL:")
+	if toolIdx < 0 {
+		return "", "", true
+	}
+	rest := response[toolIdx+5:]
+
+	// Find INPUT: marker
+	inputIdx := strings.Index(rest, "INPUT:")
+	if inputIdx < 0 {
+		// Tool name only, no input
+		tool = strings.TrimSpace(rest)
+		return tool, "", false
+	}
+
+	tool = strings.TrimSpace(rest[:inputIdx])
+	input = strings.TrimSpace(rest[inputIdx+6:])
+	return tool, input, false
+}
+
+func (a *Agent) summarizeActions(actions []ActionResult) string {
+	var sb strings.Builder
+	for i, ar := range actions {
+		status := "OK"
+		if !ar.OK {
+			status = "FAILED"
+		}
+		fmt.Fprintf(&sb, "%d. [%s] %s(%s) → %s\n", i+1, status, ar.Tool, truncate(ar.Input, 80), truncate(ar.Output, 100))
+	}
+	return sb.String()
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
