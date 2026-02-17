@@ -40,11 +40,13 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 ### agent-artifacts — DROPPED
 - Filesystem + git + agent-memory covers it
 
-### todo-mgmt — DROPPED
-- Researched but doesn't pass tool filter
-- Session-scoped tasks don't need a DB; persistent tasks confuse agents
-- CLI can't detect sessions — plumbing around a limitation, not solving a problem
-- "What to do next" answered by plan-doc + cron prompts + MEMORY.md
+### todo-mgmt (v0.1.0) — DONE
+- Repo: github.com/rcliao/todo-mgmt
+- Session-scoped focus tool — keeps agents on track, not a persistent task DB
+- Commands: add, list, next, done, skip, note, clear
+- Flat ordered list, ULID prefix matching, JSON output
+- 15/15 acceptance tests passing
+- Key insight: persistence confuses agents; this is a guardrail, not a database
 
 ### research-helper — NOT STARTED
 - Two-tier: plan queries → execute → synthesize

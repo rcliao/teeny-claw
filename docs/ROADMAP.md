@@ -47,10 +47,14 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 **Depends on:** agent-memory (for syncing summaries)
 **Status:** Phase 1 done — record, query, price. 16/16 tests. Phase 2 (export, summary, sync) deferred.
 
-### ~~3. `todo-mgmt`~~ — DROPPED
-Researched but doesn't pass the tool filter. Session-scoped tasks don't need a database, and persistent tasks confuse agents with stale context. The CLI can't detect sessions anyway. The "what should I do next?" question is better answered by plan-doc + cron prompts + MEMORY.md.
+### 3. `todo-mgmt` ✅ — Focus Tool
+**What:** Session-scoped ordered task list that keeps agents on track. Agent decomposes a goal → creates todos → works through them in order. The guardrail against drift.
+**Why:** Agents wander without structure. A simple ordered list keeps execution focused.
+**Key insight:** Not a persistent task database — it's a focus mechanism. Session-scoped, caller manages lifecycle.
+**Depends on:** Nothing (standalone)
+**Status:** Building now
 
-### 3. `research-helper` 🔍 — Structured Investigation
+### 4. `research-helper` 🔍 — Structured Investigation
 **What:** Two-tier deep research: plan what to research → execute research queries → synthesize findings. Not just "search the web" but structured investigation with a query plan phase.
 **Why:** Current research is ad-hoc web_search calls. A structured approach produces better, more thorough results.
 **Depends on:** agent-memory (storing findings), todo-mgmt (tracking research tasks)
@@ -93,8 +97,8 @@ Each tool follows this loop:
 |------|-------|--------|
 | agent-memory | Done ✅ | All phases complete |
 | token-eval | Build ✅ | Phase 1 done (capture). Phase 2 (export/summary) deferred |
-| todo-mgmt | Dropped | Session-scoped tasks don't need a tool; CLI can't detect sessions |
-| research-helper | — | Not started — next up |
+| todo-mgmt | Done ✅ | Session-scoped focus tool — 15/15 tests |
+| research-helper | Research | Sub-agent researching now |
 | plan-doc | — | Not started |
 
 ## Notes
