@@ -87,7 +87,7 @@ Each tool follows this loop:
 | Tool | Phase | Status |
 |------|-------|--------|
 | agent-memory | Done ✅ | All phases complete — CRUD, FTS5 search, context assembly, links, vector embeddings |
-| token-eval | — | Not started |
+| token-eval | Plan ✅ | Design done, building Phase 1 (capture) |
 | agent-artifacts | — | Not started |
 | research-helper | — | Not started |
 | todo-mgmt | — | Not started |
