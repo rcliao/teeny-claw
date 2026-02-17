@@ -117,7 +117,7 @@ CREATE TABLE steps (
     id          TEXT PRIMARY KEY,
     trace_id    TEXT NOT NULL REFERENCES traces(id),
     seq         INTEGER NOT NULL,
-    phase       TEXT NOT NULL,     -- thought|action|observe|goal|explore|plan|act|reflect|evolve
+    phase       TEXT NOT NULL,     -- free-form; conventions: thought|action|observe (ReAct), goal|explore|plan|act|reflect|evolve (GEPA)
     prompt      TEXT,
     context     TEXT,
     intent      TEXT,
@@ -291,7 +291,7 @@ This doesn't all need to land in token-eval v0.1. Proposed phasing:
 
 1. **Who creates traces?** The agent harness (OpenClaw) or the agent itself? If the harness, it needs to know about loop structure. If the agent, it needs to call `trace start/step/finish`.
 
-2. **Phase naming flexibility**: Should phases be fixed (`thought|action|observe|goal|explore|plan|act|reflect|evolve`) or free-form strings? Free-form is more flexible but harder to analyze. Recommendation: free-form with conventional names.
+2. **Phase naming**: Free-form strings with documented conventions. ReAct: `thought|action|observe`. GEPA: `goal|explore|plan|act|reflect|evolve`. Agents can use any string. ✅ Decided.
 
 3. **Nested traces**: Can a trace contain sub-traces? e.g., a GEPA act phase that internally uses ReAct. Start simple (flat), add nesting later if needed.
 
