@@ -69,7 +69,16 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 **Research topics:** Human-in-the-loop planning, comment-based steering, structured plan formats, TUI design patterns.
 
 ## ~~agent-artifacts~~ — DROPPED
-Originally planned as file/artifact management. Decided the filesystem + git + agent-memory already covers this. Agents don't need a separate artifact store — they need good orchestration of context via memory.
+Filesystem + git + agent-memory covers it. Didn't pass the tool filter:
+- **Scale:** Files don't scale differently in a tool vs filesystem
+- **Structure:** No enforced schema needed beyond filenames + directories
+- **UX:** `ls`/`cat`/`git` is already the UX
+
+### When to build a tool vs use markdown + grep + git
+A dedicated tool earns its existence when it provides:
+1. **Scale** — Data outgrows a single file or needs indexed queries
+2. **Forced structure** — Consistent schema enables cross-record analysis
+3. **Better UX** — CLI gives human/agent something grep can't
 
 ## Development Cycle (per tool)
 
