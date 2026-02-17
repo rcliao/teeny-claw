@@ -37,12 +37,21 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 - 16/16 acceptance tests passing
 - **Next**: Phase 2 (export, summary, sync) OR move to next tool
 
-### agent-artifacts — NOT STARTED
-- No research or design doc yet
+### agent-artifacts — DROPPED
+- Filesystem + git + agent-memory covers it
+
+### todo-mgmt — NOT STARTED (next up)
+- Bridge between planning and execution
+- Structured "what should I do next?" for agent sessions
+- Needs research + design doc
 
 ### research-helper — NOT STARTED
-### todo-mgmt — NOT STARTED
+- Two-tier: plan queries → execute → synthesize
+- Structured investigation, not ad-hoc search
+
 ### plan-doc — NOT STARTED
+- Human-agent collaborative planning via TUI-friendly comment docs
+- Like Claude Code plan mode but persistent and commentable
 
 ## Design Docs
 - `docs/design/agent-memory-design.md` — full schema and CLI spec

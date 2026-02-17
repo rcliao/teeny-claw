@@ -10,21 +10,21 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 
 ```
                     ┌─────────────┐
-                    │  plan-doc   │  ← 6. Capstone
+                    │  plan-doc   │  ← 5. Capstone
                     │ (steering)  │
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │  todo-mgmt  │  ← 5. Management
+                    │  todo-mgmt  │  ← 4. Management
                     │   (tasks)   │
                     └──────┬──────┘
                            │
          ┌─────────────────┼─────────────────┐
          │                 │                 │
-  ┌──────▼──────┐  ┌───────▼──────┐  ┌──────▼──────┐
-  │ token-eval  │  │   research   │  │   agent-    │  ← 2-4. Middle layer
-  │  (metrics)  │  │   helper     │  │  artifacts  │
-  └──────┬──────┘  └───────┬──────┘  └──────┬──────┘
+  ┌──────▼──────┐  ┌───────▼──────┐         │
+  │ token-eval  │  │   research   │         │  ← 2-3. Middle layer
+  │  (capture)  │  │   helper     │         │
+  └──────┬──────┘  └───────┬──────┘         │
          │                 │                 │
          └─────────────────┼─────────────────┘
                            │
@@ -36,66 +36,66 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 
 ## Build Order (Bottom-Up)
 
-### 1. `agent-memory` 🧱 — Foundation
+### 1. `agent-memory` 🧱 — Foundation ✅
 **What:** Persistent structured storage for agent data. Simple read/write/query CLI.
 **Why first:** Everything else needs somewhere to persist state.
-**Research topics:** Existing agent memory systems, structured vs vector storage, embedding approaches, sqlite vs file-based.
+**Status:** Done — CRUD, FTS5 search, context assembly, links, vector embeddings. 39/39 tests.
 
-### 2. `token-eval` 📊 — Measurement
-**What:** Token/cost tracking & evaluation per session/workflow. CLI that wraps agent runs and records metrics.
-**Why second:** Once this exists, every subsequent tool we build gets cost tracking for free. Also validates our own dev cycle spend.
-**Depends on:** agent-memory (for storing metrics over time)
-**Research topics:** Token counting approaches, cost estimation APIs, quality signal heuristics.
+### 2. `token-eval` 📊 — Capture ✅ (Phase 1)
+**What:** Captures the full context of every LLM call — prompt, context, intent, output — for measuring prompt effectiveness and building eval datasets.
+**Why second:** Foundation for eval loops. Every subsequent tool we build gets captured for evaluation.
+**Depends on:** agent-memory (for syncing summaries)
+**Status:** Phase 1 done — record, query, price. 16/16 tests. Phase 2 (export, summary, sync) deferred.
 
-### 3. `agent-artifacts` 📦 — Structure
-**What:** Shared structured artifact store for multi-agent handoffs. Common read/write format (not free-form text blobs).
-**Why third:** Enables real multi-agent workflows with context continuity.
-**Depends on:** agent-memory (for storage backend)
-**Research topics:** Anthropic Memory object pattern, shared-repo approaches from autonomous research papers, artifact schemas.
+### 3. `todo-mgmt` ✅ — Execution Bridge
+**What:** The bridge between planning and execution. Agent makes a plan → todos track what needs doing → agent works through them across sessions → human can see progress and reprioritize.
+**Why:** Agents need a "what should I do next?" answer every session. Memory is context, todos are intent.
+**Depends on:** agent-memory (persistence)
+**Key problem:** Cron sessions need to pick up work, know what's done, what's blocked, what's next. Currently we use MEMORY.md + roadmap, but a structured task store would be cleaner.
+**Research topics:** Task CLI tools, priority/dependency tracking, agent task decomposition patterns.
 
-### 4. `research-helper` 🔍 — Intelligence
-**What:** Standalone research CLI. Complement to OpenClaw's deep-research skill.
-**Why fourth:** Can use artifacts for structured output, token-eval for cost awareness.
-**Depends on:** agent-artifacts (structured output), token-eval (cost tracking)
-**Research topics:** Search API integration, query decomposition, result ranking, dedup strategies.
+### 4. `research-helper` 🔍 — Structured Investigation
+**What:** Two-tier deep research: plan what to research → execute research queries → synthesize findings. Not just "search the web" but structured investigation with a query plan phase.
+**Why:** Current research is ad-hoc web_search calls. A structured approach produces better, more thorough results.
+**Depends on:** agent-memory (storing findings), todo-mgmt (tracking research tasks)
+**Key problem:** Research quality depends on query planning. Bad queries → shallow results. The tool should enforce plan-first research.
+**Research topics:** Query decomposition, multi-source synthesis, claim verification, search API integration.
 
-### 5. `todo-mgmt` ✅ — Management
-**What:** Task management for agents. Track work items, priorities, dependencies across projects.
-**Why fifth:** Agents can now track their own work with persistence + cross-agent sharing.
-**Depends on:** agent-memory (persistence), agent-artifacts (cross-agent task sharing)
-**Research topics:** Task management CLIs, priority algorithms, dependency graphs.
-
-### 6. `plan-doc` 📋 — Steering (Capstone)
-**What:** Planning docs with inline comments for human steering. Agents write plans, humans steer via comments.
-**Why last:** Uses everything — research feeds plans, todos track execution, artifacts carry context, token-eval watches costs.
+### 5. `plan-doc` 📋 — Human-Agent Collaboration (Capstone)
+**What:** Collaborative planning between human and agent via a structured doc with inline comments. Like Claude Code's plan mode but TUI-friendly — agent proposes, human comments/steers, agent revises.
+**Why last:** Uses everything — research feeds plans, todos track execution.
 **Depends on:** All of the above.
-**Research topics:** Human-in-the-loop patterns, comment-based steering, plan formats.
+**Key problem:** Current planning is chat-based — linear, hard to reference, easy to lose context. A doc with comments gives both sides a shared artifact to iterate on.
+**Research topics:** Human-in-the-loop planning, comment-based steering, structured plan formats, TUI design patterns.
+
+## ~~agent-artifacts~~ — DROPPED
+Originally planned as file/artifact management. Decided the filesystem + git + agent-memory already covers this. Agents don't need a separate artifact store — they need good orchestration of context via memory.
 
 ## Development Cycle (per tool)
 
 Each tool follows this loop:
 
-1. 🔍 **Research** — Use deep-research skill to survey prior art, patterns, avoid reinventing wheels
+1. 🔍 **Research** — Survey prior art, patterns, avoid reinventing wheels
 2. 📋 **Plan** — Distill findings into a design doc
-3. 🎯 **Steer** — EV reviews, adjusts direction
-4. 🔨 **Build** — Dev agents implement (Go, each tool = own GitHub repo)
-5. ✅ **Evaluate/Validate** — Test, measure quality, track costs
+3. 🎯 **Steer** — Eric reviews, adjusts direction
+4. 🔨 **Build** — Dev sessions implement (Go, each tool = own GitHub repo)
+5. ✅ **Evaluate** — Test, measure quality, track prompt effectiveness
 6. 🔄 **Guide next cycle** — Learnings feed back into research for next tool
 
 ## Status
 
 | Tool | Phase | Status |
 |------|-------|--------|
-| agent-memory | Done ✅ | All phases complete — CRUD, FTS5 search, context assembly, links, vector embeddings |
-| token-eval | Plan ✅ | Design done, building Phase 1 (capture) |
-| agent-artifacts | — | Not started |
+| agent-memory | Done ✅ | All phases complete |
+| token-eval | Build ✅ | Phase 1 done (capture). Phase 2 (export/summary) deferred |
+| todo-mgmt | — | Not started — next up |
 | research-helper | — | Not started |
-| todo-mgmt | — | Not started |
 | plan-doc | — | Not started |
 
 ## Notes
 
 - Each tool is a separate GitHub project under `github.com/rcliao/`
-- Language: Go
+- Language: Go, pure Go deps (no CGo), standalone binaries
 - Keep tools tiny and composable — unix philosophy
+- Text in, text out
 - Agents should be able to build and use their own tools (dogfooding)
