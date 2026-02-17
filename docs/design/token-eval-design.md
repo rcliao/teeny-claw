@@ -5,17 +5,17 @@
 
 ## Overview
 
-A tiny CLI that **captures the full context of every LLM call** — prompt, context, intended changes, tokens used, and output — so you can build eval datasets and run evaluation loops later.
+A tiny CLI that **captures the full context of every LLM call** — prompt, context, intent, and output — so you can measure **prompt effectiveness** and build eval datasets over time.
 
-The primary job is **capture**. Cost computation and summaries are nice-to-haves built on top of the captured data.
+The core question: **does this prompt produce what we intend?** Everything else (cost, model choice) is secondary metadata.
 
 ## Goals
 
-- **Capture everything**: prompt, context, intended changes, model, tokens, output, result
-- Build eval datasets: every record is a potential test case for "did the model do what we wanted?"
-- Query records for replay and analysis
-- Cost computation as a derived metric (not the primary purpose)
-- Foundation for eval loops: retrieve records → run against golden dataset → score
+- **Capture the prompt-to-outcome chain**: prompt → context → intent → output → result
+- Measure prompt effectiveness: which prompts consistently produce good results?
+- Build eval datasets: passing records become golden test cases
+- Enable prompt improvement: when a prompt fails, the captured data shows what was missing
+- Track prompt changes over time: same task, different prompts, which works better?
 
 ## Non-Goals (v1)
 
@@ -106,20 +106,23 @@ CREATE TABLE pricing (
 ### The Eval Loop (future, not v1)
 
 ```
-Records DB                     Golden Dataset
-    │                              │
-    ▼                              ▼
-token-eval query              expected outputs
-  --task "code-review"         for same prompts
-  --result pass                    │
-    │                              │
-    └──────────┬───────────────────┘
-               ▼
-         Eval Runner (future tool)
-         - replay prompt against new model
-         - compare output vs golden
-         - score: did cheaper model match?
+Prompt A for task X → pass (quality 90)
+Prompt B for task X → fail
+Prompt C for task X → pass (quality 95)
+                         │
+                         ▼
+              "Prompt C is most effective for task X"
+              "Prompt B failed because it lacked schema context"
+              "Adding intent field improved pass rate from 70% → 95%"
 ```
+
+The dataset answers **prompt effectiveness** questions:
+- Which prompt patterns work best for which task types?
+- What context is necessary vs noise?
+- When prompts fail, what's the common thread?
+- How do prompt iterations improve results over time?
+
+Model choice and cost are useful metadata but not the primary signal. A well-crafted prompt on a cheap model beats a bad prompt on an expensive one.
 
 We're building the capture layer now. The eval runner comes later.
 
@@ -409,21 +412,21 @@ token-eval summary -p "teeny-claw" --today
 ### The Eval Loop (future)
 
 ```
-1. Capture: agent works → token-eval record (every call)
-2. Curate:  token-eval export --result pass → golden.jsonl
-3. Replay:  feed same prompts to cheaper model
-4. Score:   compare outputs against golden
-5. Decide:  "Sonnet handles 90% of these tasks at 1/5 the cost"
+1. Capture:  agent works → token-eval record (every call)
+2. Curate:   token-eval export --result pass → golden.jsonl
+3. Analyze:  which prompts work? which fail? what's the pattern?
+4. Improve:  refine prompts based on data
+5. Validate: re-run improved prompts, measure pass rate change
 ```
 
-token-eval handles steps 1-2. Steps 3-5 are a future eval runner tool.
+token-eval handles steps 1-2. Steps 3-5 can be done manually at first, automated later.
 
 ### How OpenClaw could integrate
 
 OpenClaw already has token counts in `/status`. Future integration:
 1. OpenClaw calls `token-eval record` after each agent turn (with prompt + context + output)
-2. Agent can query its own history: `token-eval query --last 24h`
-3. Quality keeper cron records pass/fail for each dev session
+2. Agent can query its own prompt history: `token-eval query --task X --result fail` → "why did these fail?"
+3. Quality keeper cron records pass/fail for each dev session, building the dataset automatically
 
 ---
 
@@ -458,6 +461,7 @@ OpenClaw already has token counts in `/status`. Future integration:
 ## Open Items
 
 - **Token counting (pre-flight):** Worth adding `token-eval count "text"` using tiktoken-go? Useful but adds ~4MB to binary. Defer.
-- **Eval runner:** Separate tool that reads exported golden datasets, replays prompts against different models, and scores. Not token-eval's job, but token-eval feeds it.
-- **Auto-capture from OpenClaw:** Could OpenClaw be configured to automatically call `token-eval record` after each turn? Would give us full capture without agent cooperation.
-- **Prompt size:** Prompts and outputs can be large. Should we cap what gets stored? Or let SQLite handle it? Start with no cap, revisit if DB bloats.
+- **Eval runner:** Separate tool that reads exported golden datasets, runs prompt variations, and scores effectiveness. Not token-eval's job, but token-eval feeds it.
+- **Prompt diff tracking:** When the same task gets different prompts over time, could we auto-diff them and correlate with quality changes? e.g. "Adding schema context to code-review prompts improved pass rate 70% → 95%"
+- **Auto-capture from OpenClaw:** Could OpenClaw call `token-eval record` after each turn? Full capture without agent cooperation.
+- **Prompt size:** Prompts and outputs can be large. Start with no cap, revisit if DB bloats.
