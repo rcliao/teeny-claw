@@ -40,10 +40,11 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 ### agent-artifacts — DROPPED
 - Filesystem + git + agent-memory covers it
 
-### todo-mgmt — NOT STARTED (next up)
-- Bridge between planning and execution
-- Structured "what should I do next?" for agent sessions
-- Needs research + design doc
+### todo-mgmt — DROPPED
+- Researched but doesn't pass tool filter
+- Session-scoped tasks don't need a DB; persistent tasks confuse agents
+- CLI can't detect sessions — plumbing around a limitation, not solving a problem
+- "What to do next" answered by plan-doc + cron prompts + MEMORY.md
 
 ### research-helper — NOT STARTED
 - Two-tier: plan queries → execute → synthesize

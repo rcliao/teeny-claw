@@ -47,21 +47,17 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 **Depends on:** agent-memory (for syncing summaries)
 **Status:** Phase 1 done — record, query, price. 16/16 tests. Phase 2 (export, summary, sync) deferred.
 
-### 3. `todo-mgmt` ✅ — Execution Bridge
-**What:** The bridge between planning and execution. Agent makes a plan → todos track what needs doing → agent works through them across sessions → human can see progress and reprioritize.
-**Why:** Agents need a "what should I do next?" answer every session. Memory is context, todos are intent.
-**Depends on:** agent-memory (persistence)
-**Key problem:** Cron sessions need to pick up work, know what's done, what's blocked, what's next. Currently we use MEMORY.md + roadmap, but a structured task store would be cleaner.
-**Research topics:** Task CLI tools, priority/dependency tracking, agent task decomposition patterns.
+### ~~3. `todo-mgmt`~~ — DROPPED
+Researched but doesn't pass the tool filter. Session-scoped tasks don't need a database, and persistent tasks confuse agents with stale context. The CLI can't detect sessions anyway. The "what should I do next?" question is better answered by plan-doc + cron prompts + MEMORY.md.
 
-### 4. `research-helper` 🔍 — Structured Investigation
+### 3. `research-helper` 🔍 — Structured Investigation
 **What:** Two-tier deep research: plan what to research → execute research queries → synthesize findings. Not just "search the web" but structured investigation with a query plan phase.
 **Why:** Current research is ad-hoc web_search calls. A structured approach produces better, more thorough results.
 **Depends on:** agent-memory (storing findings), todo-mgmt (tracking research tasks)
 **Key problem:** Research quality depends on query planning. Bad queries → shallow results. The tool should enforce plan-first research.
 **Research topics:** Query decomposition, multi-source synthesis, claim verification, search API integration.
 
-### 5. `plan-doc` 📋 — Human-Agent Collaboration (Capstone)
+### 4. `plan-doc` 📋 — Human-Agent Collaboration (Capstone)
 **What:** Collaborative planning between human and agent via a structured doc with inline comments. Like Claude Code's plan mode but TUI-friendly — agent proposes, human comments/steers, agent revises.
 **Why last:** Uses everything — research feeds plans, todos track execution.
 **Depends on:** All of the above.
@@ -97,8 +93,8 @@ Each tool follows this loop:
 |------|-------|--------|
 | agent-memory | Done ✅ | All phases complete |
 | token-eval | Build ✅ | Phase 1 done (capture). Phase 2 (export/summary) deferred |
-| todo-mgmt | — | Not started — next up |
-| research-helper | — | Not started |
+| todo-mgmt | Dropped | Session-scoped tasks don't need a tool; CLI can't detect sessions |
+| research-helper | — | Not started — next up |
 | plan-doc | — | Not started |
 
 ## Notes
