@@ -68,3 +68,4 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 - Dev session cron works best when it figures out state itself (not a fixed task list)
 - Quality keeper should be separate from dev — different concerns
 - Acceptance test scripts need `$((PASS + 1))` not `((PASS++))` with `set -e`
+- **Don't build tools for what markdown + grep + git already handles.** agent-artifacts was dropped because files are files. Only build a tool when the problem actually needs structure beyond what the filesystem provides.
