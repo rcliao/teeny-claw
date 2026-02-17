@@ -53,9 +53,29 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 - With LLM: duplicates the agent itself
 - The agent *is* the research helper
 
-### plan-doc — NOT STARTED
-- Human-agent collaborative planning via TUI-friendly comment docs
-- Like Claude Code plan mode but persistent and commentable
+### teeny-orchestrator (v0.1.0) — Phase 1 IN PROGRESS
+- Repo: github.com/rcliao/teeny-orchestrator (local: ~/src/pikamini/projects/teeny-orchestrator)
+- Lightweight autonomous agent runtime in Go
+- Core loop: context builder → provider → tool loop → session
+- Anthropic provider adapter (Messages API + tool use)
+- Tool registry with manifest discovery (tool.json format)
+- Context builder with bootstrap files + budget management
+- Session manager (JSON, atomic writes)
+- Auto-capture to token-eval
+- CLI: init, run, chat commands
+- Tool manifests written for agent-memory, token-eval, todo-mgmt
+- 8/8 acceptance tests passing
+- **Next**: test end-to-end with API key, then Phase 2 (daemon/cron/heartbeat)
+- **Key insight**: context construction IS the product — same LLM behaves differently based on what's in the window
+- **Differentiator**: eval-grounded self-improvement loop (heartbeat reviews token-eval data, stores learnings in agent-memory)
+
+### plan-doc — DEFERRED
+- Conversation IS the planning surface; orchestrator handles context passing
+- Revisit if needed for multi-agent collaboration
+
+### research-helper — DEFERRED
+- Only matters for multi-provider scenarios
+- Agent already does research; tool would be thin wrapper
 
 ## Design Docs
 - `docs/design/agent-memory-design.md` — full schema and CLI spec
