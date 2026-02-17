@@ -48,9 +48,10 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 - 15/15 acceptance tests passing
 - Key insight: persistence confuses agents; this is a guardrail, not a database
 
-### research-helper — NOT STARTED
-- Two-tier: plan queries → execute → synthesize
-- Structured investigation, not ad-hoc search
+### research-helper — DROPPED
+- Without LLM: thin wrapper around web_search + web_fetch (agent already does this)
+- With LLM: duplicates the agent itself
+- The agent *is* the research helper
 
 ### plan-doc — NOT STARTED
 - Human-agent collaborative planning via TUI-friendly comment docs

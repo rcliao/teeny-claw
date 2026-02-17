@@ -54,14 +54,10 @@ Build order follows the dependency graph — bottom-up from foundational to caps
 **Depends on:** Nothing (standalone)
 **Status:** Building now
 
-### 4. `research-helper` 🔍 — Structured Investigation
-**What:** Two-tier deep research: plan what to research → execute research queries → synthesize findings. Not just "search the web" but structured investigation with a query plan phase.
-**Why:** Current research is ad-hoc web_search calls. A structured approach produces better, more thorough results.
-**Depends on:** agent-memory (storing findings), todo-mgmt (tracking research tasks)
-**Key problem:** Research quality depends on query planning. Bad queries → shallow results. The tool should enforce plan-first research.
-**Research topics:** Query decomposition, multi-source synthesis, claim verification, search API integration.
+### ~~4. `research-helper`~~ — DROPPED
+Without an LLM, it's just a thin wrapper around web_search + web_fetch (which agents already use). With an LLM, it duplicates the agent itself. The agent *is* the research helper.
 
-### 4. `plan-doc` 📋 — Human-Agent Collaboration (Capstone)
+### 4. `plan-doc` 📋 — Human-Agent Collaboration
 **What:** Collaborative planning between human and agent via a structured doc with inline comments. Like Claude Code's plan mode but TUI-friendly — agent proposes, human comments/steers, agent revises.
 **Why last:** Uses everything — research feeds plans, todos track execution.
 **Depends on:** All of the above.
@@ -98,7 +94,7 @@ Each tool follows this loop:
 | agent-memory | Done ✅ | All phases complete |
 | token-eval | Build ✅ | Phase 1 done (capture). Phase 2 (export/summary) deferred |
 | todo-mgmt | Done ✅ | Session-scoped focus tool — 15/15 tests |
-| research-helper | Research | Sub-agent researching now |
+| research-helper | Dropped | Agent + web_search is already the research helper |
 | plan-doc | — | Not started |
 
 ## Notes
