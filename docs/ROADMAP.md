@@ -86,7 +86,7 @@ Each tool follows this loop:
 
 | Tool | Phase | Status |
 |------|-------|--------|
-| agent-memory | Build ✅ | MVP complete — put/get/list/rm with SQLite, versioning, chunking |
+| agent-memory | Done ✅ | All phases complete — CRUD, FTS5 search, context assembly, links, vector embeddings |
 | token-eval | — | Not started |
 | agent-artifacts | — | Not started |
 | research-helper | — | Not started |
