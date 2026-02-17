@@ -1,30 +1,35 @@
 # token-eval — Design Doc
 
-> Measurement tool for the teeny-claw constellation.
+> Measurement & capture tool for the teeny-claw constellation.
 > Status: **Plan** | Author: teenyclaw | Date: 2026-02-16
 
 ## Overview
 
-A tiny CLI that records LLM token usage, computes cost, and lets you query spend over time. Agents and harnesses pipe structured data in; token-eval tracks it, prices it, and reports on it.
+A tiny CLI that **captures the full context of every LLM call** — prompt, context, intended changes, tokens used, and output — so you can build eval datasets and run evaluation loops later.
+
+The primary job is **capture**. Cost computation and summaries are nice-to-haves built on top of the captured data.
 
 ## Goals
 
-- Record token usage per call with project/task/model context
-- Compute cost automatically from a pricing table
-- Query: summary, trends, comparisons, budgets
-- Optional quality signals so you can answer "was that spend worth it?"
-- Dogfood agent-memory for daily summaries
+- **Capture everything**: prompt, context, intended changes, model, tokens, output, result
+- Build eval datasets: every record is a potential test case for "did the model do what we wanted?"
+- Query records for replay and analysis
+- Cost computation as a derived metric (not the primary purpose)
+- Foundation for eval loops: retrieve records → run against golden dataset → score
 
 ## Non-Goals (v1)
 
-- No proxy/middleware mode (not intercepting API calls)
-- No real-time streaming dashboard
-- No budget enforcement (reporting only)
-- No built-in tokenizer (pre-flight counting is a maybe)
+- No budget tracking or enforcement (capture first, analyze later)
+- No model comparison (that's an eval loop concern)
+- No proxy/middleware mode
+- No built-in tokenizer
+- No eval loop runner (that's a future tool — token-eval just captures and retrieves)
 
 ---
 
 ## Data Model
+
+The core insight: **every LLM call is a potential eval case**. We capture the full picture — what went in, what came out, what was intended, and the token economics.
 
 ### Schema
 
@@ -34,16 +39,28 @@ CREATE TABLE records (
     project         TEXT NOT NULL,     -- e.g. "teeny-claw", "strategy-game"
     task            TEXT,              -- e.g. "implement-put-cmd", "code-review"
     session_id      TEXT,              -- link to agent session (optional)
+
+    -- What went in
     model           TEXT NOT NULL,     -- e.g. "claude-sonnet-4", "gpt-4o"
-    provider        TEXT,              -- e.g. "anthropic", "openai", "google" (auto-detected from model if omitted)
+    provider        TEXT,              -- auto-detected from model if omitted
+    prompt          TEXT,              -- the prompt/instruction sent
+    context         TEXT,              -- system prompt, injected context, memory
+    intent          TEXT,              -- what was this call supposed to accomplish?
+
+    -- What came out
+    output          TEXT,              -- the model's response
+    result          TEXT,              -- pass | fail | null (did it work?)
+    quality         INTEGER,          -- 0-100 (optional granular score)
+
+    -- Token economics
     input_tokens    INTEGER NOT NULL DEFAULT 0,
     output_tokens   INTEGER NOT NULL DEFAULT 0,
     cache_creation  INTEGER NOT NULL DEFAULT 0,
     cache_read      INTEGER NOT NULL DEFAULT 0,
     cost_usd        REAL,             -- computed from pricing table
     duration_ms     INTEGER,          -- latency (optional)
-    result          TEXT,             -- pass | fail | null
-    quality         INTEGER,          -- 0-100 (optional)
+
+    -- Metadata
     created_at      TEXT NOT NULL,    -- RFC3339
     meta            TEXT              -- JSON for extensibility
 );
@@ -52,35 +69,59 @@ CREATE INDEX idx_records_project ON records(project);
 CREATE INDEX idx_records_model ON records(model);
 CREATE INDEX idx_records_task ON records(project, task);
 CREATE INDEX idx_records_created ON records(created_at DESC);
+CREATE INDEX idx_records_result ON records(result);
 
--- Pricing table
+-- FTS over prompt/context/output for searching records
+CREATE VIRTUAL TABLE records_fts USING fts5(
+    prompt, context, intent, output,
+    content=records,
+    content_rowid=rowid
+);
+
+-- Pricing table (secondary — cost is derived, not the point)
 CREATE TABLE pricing (
     model           TEXT PRIMARY KEY,
     provider        TEXT NOT NULL,
     input_per_mtok  REAL NOT NULL,    -- $ per million input tokens
     output_per_mtok REAL NOT NULL,    -- $ per million output tokens
-    cache_create_multiplier REAL DEFAULT 1.25,  -- multiplier on input price
-    cache_read_multiplier   REAL DEFAULT 0.1,   -- multiplier on input price
+    cache_create_multiplier REAL DEFAULT 1.25,
+    cache_read_multiplier   REAL DEFAULT 0.1,
     updated_at      TEXT NOT NULL
 );
-
--- Budget table
-CREATE TABLE budgets (
-    project         TEXT NOT NULL,
-    period          TEXT NOT NULL,    -- daily | weekly | monthly
-    amount_usd      REAL NOT NULL,
-    PRIMARY KEY (project, period)
-);
 ```
 
-### Cost Computation
+### What Gets Captured (per record)
+
+| Field | What | Why |
+|-------|------|-----|
+| `prompt` | The actual prompt/instruction | Replay: can re-run this against a different model |
+| `context` | System prompt, injected memories, tool context | Understand what the model had to work with |
+| `intent` | What this call was supposed to accomplish | Eval: does the output match the intent? |
+| `output` | The model's full response | Eval: compare against golden output |
+| `result` | pass/fail | Binary signal: did it work? |
+| `quality` | 0-100 score | Granular signal for scoring |
+| `input/output_tokens` | Token counts | Economics + efficiency analysis |
+| `cost_usd` | Computed cost | Derived metric |
+
+### The Eval Loop (future, not v1)
 
 ```
-cost = (input_tokens * input_per_mtok / 1_000_000)
-     + (output_tokens * output_per_mtok / 1_000_000)
-     + (cache_creation * input_per_mtok * cache_create_multiplier / 1_000_000)
-     + (cache_read * input_per_mtok * cache_read_multiplier / 1_000_000)
+Records DB                     Golden Dataset
+    │                              │
+    ▼                              ▼
+token-eval query              expected outputs
+  --task "code-review"         for same prompts
+  --result pass                    │
+    │                              │
+    └──────────┬───────────────────┘
+               ▼
+         Eval Runner (future tool)
+         - replay prompt against new model
+         - compare output vs golden
+         - score: did cheaper model match?
 ```
+
+We're building the capture layer now. The eval runner comes later.
 
 ### Bundled Pricing (ships with binary)
 
@@ -120,9 +161,9 @@ If `--provider` is omitted, detect from model name:
 
 ### Commands
 
-#### `record` — Record a usage event
+#### `record` — Capture an LLM call
 
-The core command. Called after every LLM call.
+The core command. Called after every LLM call. Captures the full picture.
 
 ```
 token-eval record [flags]
@@ -137,6 +178,10 @@ token-eval record [flags]
 | `--task` | `-t` | no | Task name |
 | `--session` | | no | Session ID |
 | `--provider` | | no | Provider (auto-detected if omitted) |
+| `--prompt` | | no | The prompt/instruction sent |
+| `--context` | | no | System prompt / injected context |
+| `--intent` | | no | What this call was supposed to accomplish |
+| `--response` | | no | The model's output |
 | `--cache-create` | | no | Cache creation tokens |
 | `--cache-read` | | no | Cache read tokens |
 | `--duration` | | no | Latency in ms |
@@ -144,14 +189,99 @@ token-eval record [flags]
 | `--quality` | `-q` | no | Quality score 0-100 |
 | `--meta` | | no | JSON metadata |
 
-Also accepts JSON on stdin for batch recording:
+Text fields (prompt, context, intent, response) can also come via stdin as JSON:
 ```bash
-echo '{"project":"tc","model":"claude-sonnet-4","input":1500,"output":300}' | token-eval record
+cat <<EOF | token-eval record -p "teeny-claw" -m claude-sonnet-4
+{
+  "task": "implement-search",
+  "prompt": "Add FTS5 search to the store layer",
+  "context": "Project uses SQLite via modernc.org/sqlite...",
+  "intent": "Search should match chunks and return full memories",
+  "output": "Here's the implementation...",
+  "input_tokens": 2500,
+  "output_tokens": 800,
+  "result": "pass",
+  "quality": 90
+}
+EOF
 ```
 
-**Output:** JSON of the recorded event with computed cost.
+**Output:** JSON of the captured record with computed cost.
 
-#### `summary` — Usage summary
+#### `query` — Retrieve records
+
+The retrieval side. Find records for analysis, replay, or eval.
+
+```
+token-eval query [flags] [search text]
+```
+
+| Flag | Short | Required | Description |
+|------|-------|----------|-------------|
+| `--project` | `-p` | no | Filter by project |
+| `--task` | `-t` | no | Filter by task |
+| `--model` | `-m` | no | Filter by model |
+| `--result` | | no | Filter: `pass`, `fail` |
+| `--last` | `-l` | no | Time window: `24h`, `7d`, `30d` |
+| `--limit` | | no | Max results (default 20) |
+| `--full` | | no | Include prompt/context/output in results (default: summary only) |
+
+Without search text: returns records matching filters. With search text: FTS5 search over prompt/context/intent/output.
+
+```bash
+# Get all passing code review records
+token-eval query -p "teeny-claw" -t "code-review" --result pass --full
+
+# Search for records about FTS5
+token-eval query "FTS5 search"
+
+# Get last 10 records with full content (for building golden dataset)
+token-eval query -p "teeny-claw" --last 7d --result pass --full --limit 10
+```
+
+**Output (default):**
+```json
+[
+  {
+    "id": "01HZ...",
+    "project": "teeny-claw",
+    "task": "implement-search",
+    "model": "claude-sonnet-4",
+    "intent": "Search should match chunks and return full memories",
+    "result": "pass",
+    "quality": 90,
+    "input_tokens": 2500,
+    "output_tokens": 800,
+    "cost_usd": 0.0195,
+    "created_at": "2026-02-16T20:00:00Z"
+  }
+]
+```
+
+**Output (--full):** Same but includes `prompt`, `context`, and `output` fields — everything needed to build an eval case.
+
+#### `export` — Export records for eval datasets
+
+```
+token-eval export [flags]
+```
+
+| Flag | Short | Required | Description |
+|------|-------|----------|-------------|
+| `--project` | `-p` | no | Filter by project |
+| `--task` | `-t` | no | Filter by task |
+| `--result` | | no | Filter: `pass` (for golden dataset) |
+| `--last` | `-l` | no | Time window |
+| `--format` | `-f` | no | `json` (default) or `jsonl` (one record per line) |
+
+```bash
+# Export passing records as golden dataset
+token-eval export -p "teeny-claw" --result pass -f jsonl > golden.jsonl
+```
+
+Each exported record is a complete eval case: prompt + context + intent + expected output.
+
+#### `summary` — Aggregate view (nice-to-have)
 
 ```
 token-eval summary [flags]
@@ -172,79 +302,13 @@ token-eval summary [flags]
   "total_calls": 15,
   "input_tokens": 45000,
   "output_tokens": 12000,
-  "cache_read_tokens": 80000,
   "total_cost_usd": 0.87,
-  "avg_cost_per_call": 0.058,
+  "pass_rate": 0.87,
+  "avg_quality": 85,
   "breakdown": [
-    {"model": "claude-sonnet-4", "calls": 12, "cost": 0.72},
-    {"model": "claude-opus-4", "calls": 3, "cost": 0.15}
+    {"model": "claude-sonnet-4", "calls": 12, "cost": 0.72, "pass_rate": 0.83},
+    {"model": "claude-opus-4", "calls": 3, "cost": 0.15, "pass_rate": 1.00}
   ]
-}
-```
-
-#### `trend` — Spend over time
-
-```
-token-eval trend --project "teeny-claw" --last 7d
-```
-
-| Flag | Short | Required | Description |
-|------|-------|----------|-------------|
-| `--project` | `-p` | no | Filter by project |
-| `--last` | `-l` | no | Time window (default `7d`) |
-| `--by` | | no | Group by: `day` (default), `hour`, `week` |
-
-**Output:** JSON array of daily totals.
-
-#### `compare` — Compare models or tasks
-
-```
-token-eval compare --task "code-review" --last 30d
-```
-
-| Flag | Short | Required | Description |
-|------|-------|----------|-------------|
-| `--task` | `-t` | no | Compare models for this task |
-| `--model` | `-m` | no | Compare tasks for this model |
-| `--project` | `-p` | no | Filter by project |
-| `--last` | `-l` | no | Time window |
-
-**Output:** Side-by-side comparison with avg cost, avg quality, pass rate.
-
-```json
-{
-  "task": "code-review",
-  "models": [
-    {"model": "claude-sonnet-4", "calls": 20, "avg_cost": 0.12, "avg_quality": 82, "pass_rate": 0.90},
-    {"model": "claude-opus-4", "calls": 5, "avg_cost": 0.45, "avg_quality": 91, "pass_rate": 1.00}
-  ]
-}
-```
-
-This is where quality signals pay off — you can see that Opus costs 4× more but has higher quality and 100% pass rate.
-
-#### `budget` — Budget tracking
-
-```
-token-eval budget [flags]
-```
-
-| Flag | Short | Required | Description |
-|------|-------|----------|-------------|
-| `--project` | `-p` | yes | Project |
-| `--set` | | no | Set budget: `--set 5.00 --period daily` |
-| `--period` | | no | `daily`, `weekly`, `monthly` |
-
-Without `--set`: reports current spend vs budget.
-
-```json
-{
-  "project": "teeny-claw",
-  "period": "daily",
-  "budget_usd": 5.00,
-  "spent_usd": 1.23,
-  "remaining_usd": 3.77,
-  "pct_used": 24.6
 }
 ```
 
@@ -262,13 +326,7 @@ token-eval price rm old-model                                   # remove
 token-eval sync --project "teeny-claw" --last 24h
 ```
 
-Computes a summary and writes it to agent-memory as an episodic memory:
-```bash
-agent-memory put --ns "token-eval:teeny-claw" --key "daily-2026-02-16" --kind episodic \
-  "Spent $0.87 across 15 calls. Sonnet: $0.72 (12 calls), Opus: $0.15 (3 calls). Avg quality: 85."
-```
-
-This bridges token-eval → agent-memory so agents can search their own spend history in context.
+Writes a daily summary to agent-memory as an episodic memory so agents can recall spend context.
 
 ---
 
@@ -281,25 +339,20 @@ token-eval/
 │       └── main.go
 ├── internal/
 │   ├── store/
-│   │   ├── store.go          # Store interface + SQLite
-│   │   ├── record.go         # Insert/query records
-│   │   └── record_test.go
+│   │   ├── store.go          # SQLite store + schema
+│   │   ├── record.go         # Insert records
+│   │   ├── query.go          # Query + FTS5 search
+│   │   └── store_test.go
 │   ├── pricing/
-│   │   ├── pricing.go        # Pricing table + cost computation
-│   │   ├── bundled.go        # Embedded default prices
+│   │   ├── pricing.go        # Cost computation
+│   │   ├── bundled.go        # Embedded default prices (go:embed)
 │   │   └── pricing_test.go
-│   ├── report/
-│   │   ├── summary.go        # Summary aggregations
-│   │   ├── trend.go          # Trend over time
-│   │   ├── compare.go        # Model/task comparison
-│   │   └── budget.go         # Budget tracking
 │   └── cli/
 │       ├── root.go
 │       ├── record.go
+│       ├── query.go
+│       ├── export.go
 │       ├── summary.go
-│       ├── trend.go
-│       ├── compare.go
-│       ├── budget.go
 │       ├── price.go
 │       └── sync.go
 ├── go.mod
@@ -327,72 +380,84 @@ Same three deps as agent-memory. The `sync` command shells out to `agent-memory`
 ### How agents use it
 
 ```bash
-# After every LLM call in a dev session:
-token-eval record -p "teeny-claw" -t "implement-search" \
-  -m claude-sonnet-4 -i 2500 -o 800 --cache-read 15000 \
-  --result pass --quality 90
+# After every LLM call — capture the full picture
+cat <<EOF | token-eval record -p "teeny-claw" -m claude-sonnet-4
+{
+  "task": "implement-search",
+  "prompt": "Add FTS5 full-text search to the store layer...",
+  "context": "Schema has chunks table, using modernc.org/sqlite...",
+  "intent": "Search chunks via FTS5, return full memories ranked by relevance",
+  "output": "func (s *SQLiteStore) Search(...) { ... }",
+  "input_tokens": 2500,
+  "output_tokens": 800,
+  "cache_read": 15000,
+  "result": "pass",
+  "quality": 90
+}
+EOF
 
-# At end of session:
+# Query what we've captured
+token-eval query -p "teeny-claw" --task "implement-search" --full
+
+# Build golden dataset from passing records
+token-eval export -p "teeny-claw" --result pass -f jsonl > golden.jsonl
+
+# Quick summary
 token-eval summary -p "teeny-claw" --today
-
-# Daily cron job:
-token-eval sync -p "teeny-claw" --last 24h
 ```
+
+### The Eval Loop (future)
+
+```
+1. Capture: agent works → token-eval record (every call)
+2. Curate:  token-eval export --result pass → golden.jsonl
+3. Replay:  feed same prompts to cheaper model
+4. Score:   compare outputs against golden
+5. Decide:  "Sonnet handles 90% of these tasks at 1/5 the cost"
+```
+
+token-eval handles steps 1-2. Steps 3-5 are a future eval runner tool.
 
 ### How OpenClaw could integrate
 
-OpenClaw already has token counts in `/status`. A future integration:
-1. OpenClaw calls `token-eval record` after each agent turn
-2. Agent can `token-eval summary --today` to see its own spend
-3. `token-eval budget --project X` could gate expensive operations
-
-### How quality signals flow
-
-```
-Agent does task → records result (pass/fail + quality 0-100)
-                         │
-                         ▼
-              token-eval compare --task X
-                         │
-                         ▼
-         "Sonnet is 90% as good as Opus for code reviews
-          but costs 4× less. Switch to Sonnet."
-```
-
-This is the long game: data-driven model selection per task type.
+OpenClaw already has token counts in `/status`. Future integration:
+1. OpenClaw calls `token-eval record` after each agent turn (with prompt + context + output)
+2. Agent can query its own history: `token-eval query --last 24h`
+3. Quality keeper cron records pass/fail for each dev session
 
 ---
 
 ## Build Plan
 
-### Phase 1 — Core (v0.1.0)
+### Phase 1 — Capture (v0.1.0)
 - [ ] Project scaffold (go mod, cobra, Makefile)
-- [ ] SQLite store with schema migration
-- [ ] Bundled pricing table (Go embed)
-- [ ] `record` command (flags + stdin JSON)
-- [ ] Cost computation
+- [ ] SQLite store with schema + FTS5
+- [ ] `record` command (flags + stdin JSON, full capture)
+- [ ] Cost computation + bundled pricing table (Go embed)
 - [ ] Provider auto-detection
-- [ ] `price list` / `price set` / `price rm`
+- [ ] `query` command with filters + FTS5 search
+- [ ] `price list` / `price set`
 - [ ] Unit tests
 - [ ] Acceptance test suite
 - [ ] README
 
-### Phase 2 — Reporting (v0.2.0)
-- [ ] `summary` command with grouping
-- [ ] `trend` command with time windows
-- [ ] `compare` command with quality analysis
-- [ ] `budget` set/check
-
-### Phase 3 — Integration (v0.3.0)
+### Phase 2 — Retrieval + Export (v0.2.0)
+- [ ] `export` command (JSON/JSONL, filter by result/task/project)
+- [ ] `summary` command with grouping (by model, task, day)
 - [ ] `sync` command (write to agent-memory)
 - [ ] `--format text` for human-readable output
-- [ ] Stdin batch recording (JSONL)
+- [ ] JSONL batch recording via stdin
+
+### Phase 3 — Polish (v0.3.0)
 - [ ] goreleaser + CI
+- [ ] Acceptance test hardening
+- [ ] Document eval loop workflow
 
 ---
 
 ## Open Items
 
-- **Token counting (pre-flight):** Worth adding `token-eval count "text"` using tiktoken-go? Useful but adds ~4MB to binary size from vocab embeddings. Defer to v1.0?
-- **Budget enforcement mode:** Future flag `--enforce` that returns exit code 1 when over budget. Agents check exit code before making calls.
-- **Real-time tracking:** Could token-eval accept a streaming pipe from agent stdout? Nice but complex. Defer.
+- **Token counting (pre-flight):** Worth adding `token-eval count "text"` using tiktoken-go? Useful but adds ~4MB to binary. Defer.
+- **Eval runner:** Separate tool that reads exported golden datasets, replays prompts against different models, and scores. Not token-eval's job, but token-eval feeds it.
+- **Auto-capture from OpenClaw:** Could OpenClaw be configured to automatically call `token-eval record` after each turn? Would give us full capture without agent cooperation.
+- **Prompt size:** Prompts and outputs can be large. Should we cap what gets stored? Or let SQLite handle it? Start with no cap, revisit if DB bloats.
