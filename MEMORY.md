@@ -53,21 +53,24 @@ A constellation of tiny, agent-specific CLI tools in Go. Unix philosophy: small,
 - With LLM: duplicates the agent itself
 - The agent *is* the research helper
 
-### teeny-orchestrator (v0.1.0) — Phase 1 IN PROGRESS
+### teeny-orchestrator (v0.1.0) — Phase 3 DONE
 - Repo: github.com/rcliao/teeny-orchestrator (local: ~/src/pikamini/projects/teeny-orchestrator)
 - Lightweight autonomous agent runtime in Go
 - Core loop: context builder → provider → tool loop → session
 - Anthropic provider adapter (Messages API + tool use)
 - Tool registry with manifest discovery (tool.json format)
-- Context builder with bootstrap files + budget management
+- Context builder with bootstrap files + budget management + **learning injection**
 - Session manager (JSON, atomic writes)
 - Auto-capture to token-eval
-- CLI: init, run, chat commands
+- CLI: init, run, chat, daemon, job list/run, **heartbeat** commands
 - Tool manifests written for agent-memory, token-eval, todo-mgmt
-- 8/8 acceptance tests passing
-- **Next**: test end-to-end with API key, then Phase 2 (daemon/cron/heartbeat)
+- Phase 1: core loop, Phase 2: daemon + scheduler, Phase 3: eval-grounded self-review
+- pkg/eval: queries token-eval data + agent-memory learnings, builds review summaries
+- Heartbeat command: LLM analyzes call patterns → stores learnings → learnings auto-injected into future context
+- 68 unit tests + 8 acceptance = 76 total, all passing
+- Phase 4: cron expressions ✅, README ✅, multi-provider (OpenAI-compatible) ✅, base_url config ✅ — **PHASE 4 COMPLETE**
 - **Key insight**: context construction IS the product — same LLM behaves differently based on what's in the window
-- **Differentiator**: eval-grounded self-improvement loop (heartbeat reviews token-eval data, stores learnings in agent-memory)
+- **Differentiator**: eval-grounded self-improvement loop is now BUILT (heartbeat → token-eval → analysis → agent-memory → context)
 
 ### plan-doc — DEFERRED
 - Conversation IS the planning surface; orchestrator handles context passing

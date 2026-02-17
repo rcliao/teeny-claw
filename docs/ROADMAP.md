@@ -93,6 +93,7 @@ Each tool follows this loop:
 |------|-------|--------|
 | agent-memory | Done ✅ | All phases complete |
 | token-eval | Build ✅ | Phase 1 done (capture). Phase 2 (export/summary) deferred |
+| teeny-orchestrator | Done ✅ | Core loop, daemon, eval self-review, cron, multi-provider, base_url — 77 tests |
 | todo-mgmt | Done ✅ | Session-scoped focus tool — 15/15 tests |
 | research-helper | Dropped | Agent + web_search is already the research helper |
 | plan-doc | — | Not started |
