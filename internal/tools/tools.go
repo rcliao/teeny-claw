@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/rcliao/teeny-claw/pkg/llm"
 )
 
 // Result holds the outcome of a tool execution.
@@ -75,4 +77,28 @@ func (r *Registry) Execute(ctx context.Context, name, input string) Result {
 		return Result{Error: fmt.Errorf("unknown tool: %s", name)}
 	}
 	return t.Execute(ctx, input)
+}
+
+// ToToolDefs converts all registered tools to LLM tool definitions.
+// Implements context.ToolLister.
+func (r *Registry) ToToolDefs() []llm.ToolDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	defs := make([]llm.ToolDef, 0, len(r.tools))
+	for _, t := range r.tools {
+		defs = append(defs, llm.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{
+						"type":        "string",
+						"description": "Tool input",
+					},
+				},
+			},
+		})
+	}
+	return defs
 }

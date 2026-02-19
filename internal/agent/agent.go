@@ -168,27 +168,65 @@ func (a *Agent) Run(ctx context.Context, task Task) (*StepResult, error) {
 }
 
 // act runs the multi-step tool execution loop with self-correction.
+// It uses native tool calling when the LLM supports it (returns ContentToolCall parts),
+// falling back to text-based TOOL:/INPUT: parsing for providers that don't.
 func (a *Agent) act(ctx context.Context, result *StepResult) {
-	var history string
-	toolNames := a.tools.List()
+	toolDefs := a.tools.ToToolDefs()
+
+	// Build conversation messages for the act loop
+	var messages []llm.Message
+	messages = append(messages, llm.TextMessage(llm.RoleUser, fmt.Sprintf(
+		"Execute the following plan using the available tools. When you're done, reply with just the word DONE.\n\nPlan:\n%s",
+		result.Plan,
+	)))
 
 	for step := 0; step < a.maxActSteps; step++ {
-		prompt := fmt.Sprintf(
-			"Plan:\n%s\n\nAvailable tools: %v\n\n%sWhat is the next tool call? Reply with TOOL:<name> INPUT:<input> or DONE if the plan is complete.",
-			result.Plan, toolNames, history,
-		)
-		response, err := a.generate(ctx, prompt)
+		resp, err := a.llm.Send(ctx, &llm.Request{
+			Model:    a.model,
+			Messages: messages,
+			Tools:    toolDefs,
+		})
 		if err != nil {
 			a.logger.Warn("agent: act LLM call failed", "error", err)
 			break
 		}
 
-		toolName, input, done := parseToolCall(response)
+		// Check for native tool calls
+		calls := resp.Message.ToolCalls()
+		if len(calls) > 0 {
+			// Append assistant message to conversation
+			messages = append(messages, resp.Message)
+
+			for _, call := range calls {
+				tr := a.tools.Execute(ctx, call.ToolName, string(call.ToolInput))
+				ar := ActionResult{
+					Tool:   call.ToolName,
+					Input:  string(call.ToolInput),
+					Output: tr.Output,
+					OK:     tr.OK(),
+				}
+				result.Actions = append(result.Actions, ar)
+
+				// Feed tool result back
+				resultText := tr.Output
+				isError := false
+				if !tr.OK() {
+					resultText = fmt.Sprintf("ERROR: %v\nOutput: %s", tr.Error, tr.Output)
+					isError = true
+					a.logger.Info("agent: tool failed, will self-correct", "tool", call.ToolName, "error", tr.Error)
+				}
+				messages = append(messages, llm.ToolResultMessage(call.ToolCallID, resultText, isError))
+			}
+			continue
+		}
+
+		// Fallback: text-based parsing for providers without native tool calls
+		text := resp.Message.Text()
+		toolName, input, done := parseToolCall(text)
 		if done {
 			break
 		}
 
-		// Execute the tool.
 		tr := a.tools.Execute(ctx, toolName, input)
 		ar := ActionResult{
 			Tool:   toolName,
@@ -198,11 +236,14 @@ func (a *Agent) act(ctx context.Context, result *StepResult) {
 		}
 		result.Actions = append(result.Actions, ar)
 
+		// Append assistant message and tool result to conversation
+		messages = append(messages, resp.Message)
 		if tr.OK() {
-			history += fmt.Sprintf("Step %d: TOOL:%s → OK: %s\n", step+1, toolName, truncate(tr.Output, 200))
+			messages = append(messages, llm.TextMessage(llm.RoleUser,
+				fmt.Sprintf("Tool %s returned: %s\n\nContinue with the plan or reply DONE.", toolName, truncate(tr.Output, 500))))
 		} else {
-			// Self-correction: feed error back to LLM.
-			history += fmt.Sprintf("Step %d: TOOL:%s → ERROR: %s (output: %s)\n", step+1, toolName, tr.Error, truncate(tr.Output, 200))
+			messages = append(messages, llm.TextMessage(llm.RoleUser,
+				fmt.Sprintf("Tool %s failed: %v (output: %s)\n\nAdjust and continue or reply DONE.", toolName, tr.Error, truncate(tr.Output, 500))))
 			a.logger.Info("agent: tool failed, will self-correct", "tool", toolName, "error", tr.Error)
 		}
 	}
