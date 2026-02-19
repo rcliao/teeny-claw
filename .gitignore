@@ -1,1 +1,13 @@
+# Build output
+bin/
+
+# Runtime memory/session files
+memory/
+
+# Sub-tools (independent repos)
 agent-memory/
+todo-mgmt/
+token-eval/
+
+# OS
+.DS_Store
